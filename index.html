@@ -801,9 +801,92 @@
      entrance screen finishes, then plays its normal fade-up sequence. */
   .anim-gate{ animation-play-state:paused; }
   body.entrance-done .anim-gate{ animation-play-state:running; }
+
+  /* ============ PRE-LOAD SCREEN ============
+     Sits above the entrance screen while the intro videos buffer enough
+     to play smoothly — matters most on slower connections. */
+  .site-loader{
+    position:fixed;
+    inset:0;
+    z-index:4000;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    background:linear-gradient(180deg, #0F0F0F 0%, #17121C 55%, #0F0F0F 100%);
+    transition:opacity 0.8s ease;
+    padding:24px;
+    text-align:center;
+  }
+  .site-loader.loader-hide{
+    opacity:0;
+    pointer-events:none;
+  }
+  .site-loader-monogram{
+    font-family:var(--serif);
+    font-style:italic;
+    color:var(--accent);
+    font-size:1.8rem;
+    margin-bottom:30px;
+    opacity:0.9;
+  }
+  .site-loader-ring{
+    width:50px;
+    height:50px;
+    border-radius:50%;
+    border:2.5px solid rgba(183,159,209,0.18);
+    border-top-color:var(--accent);
+    animation:loaderSpin 1s linear infinite;
+    margin-bottom:22px;
+  }
+  @keyframes loaderSpin{ to{ transform:rotate(360deg); } }
+  .site-loader-text{
+    font-size:0.7rem;
+    letter-spacing:0.16em;
+    text-transform:uppercase;
+    color:var(--text-secondary);
+    min-height:1.4em;
+  }
+  .site-loader-skip{
+    margin-top:28px;
+    font-family:var(--sans);
+    font-size:0.68rem;
+    letter-spacing:0.1em;
+    text-transform:uppercase;
+    color:var(--text-secondary);
+    border:1px solid rgba(255,255,255,0.16);
+    border-radius:999px;
+    padding:9px 22px;
+    background:transparent;
+    cursor:pointer;
+    opacity:0;
+    pointer-events:none;
+    transition:opacity 0.4s ease, border-color 0.3s ease, color 0.3s ease;
+  }
+  .site-loader-skip.show{
+    opacity:1;
+    pointer-events:auto;
+  }
+  .site-loader-skip:hover, .site-loader-skip:focus-visible{
+    border-color:var(--accent);
+    color:var(--accent);
+  }
+
+  @media (prefers-reduced-motion: reduce){
+    .site-loader-ring{ animation-duration:1.8s; }
+    .site-loader{ transition-duration:0.4s; }
+  }
 </style>
 </head>
 <body class="entrance-active">
+
+<!-- ============ PRE-LOAD SCREEN ============ -->
+<div id="site-loader" class="site-loader" role="status" aria-live="polite">
+  <p class="site-loader-monogram">S &amp; S</p>
+  <div class="site-loader-ring" aria-hidden="true"></div>
+  <p class="site-loader-text" id="site-loader-text">Preparing your invitation…</p>
+  <button type="button" id="site-loader-skip" class="site-loader-skip">Skip waiting</button>
+</div>
 
 <!-- ============ ENTRANCE ANIMATION ============ -->
 <div id="entrance-screen" class="entrance-screen">
@@ -825,6 +908,74 @@
     <source src="clips/intro16x9.mp4" type="video/mp4">
   </video>
   <div class="entrance-video-overlay"></div>
+
+  <script>
+  /* Runs immediately (before the rest of the page's script) so it starts
+     listening the moment these two <video> tags exist — nothing is missed
+     even if a video loads very quickly (e.g. from cache). */
+  (function(){
+    var loader = document.getElementById('site-loader');
+    if(!loader) return;
+
+    var loaderText = document.getElementById('site-loader-text');
+    var loaderSkip = document.getElementById('site-loader-skip');
+    var idleVideo = document.getElementById('entrance-video-idle');
+    var mainVideo = document.getElementById('entrance-video-main');
+
+    var MIN_DISPLAY_MS = 900;   /* avoid an unpleasant flash on fast connections */
+    var MAX_WAIT_MS = 12000;    /* don't trap slow connections forever */
+    var SKIP_APPEAR_MS = 4500;  /* let people bail out of the wait if they want */
+
+    var startTime = Date.now();
+    var dismissed = false;
+
+    function hideLoader(){
+      if(dismissed) return;
+      dismissed = true;
+      var wait = Math.max(0, MIN_DISPLAY_MS - (Date.now() - startTime));
+      setTimeout(function(){
+        loader.classList.add('loader-hide');
+        setTimeout(function(){ loader.style.display = 'none'; }, 850);
+      }, wait);
+    }
+
+    function videoIsReady(video){
+      /* readyState 3 = HAVE_FUTURE_DATA, 4 = HAVE_ENOUGH_DATA — either is
+         enough to start smooth playback. */
+      return !video || video.readyState >= 3;
+    }
+
+    function checkReady(){
+      if(videoIsReady(idleVideo) && videoIsReady(mainVideo)){ hideLoader(); }
+    }
+
+    function updateProgressText(){
+      if(dismissed || !loaderText) return;
+      var video = idleVideo || mainVideo;
+      if(video && video.duration && video.buffered && video.buffered.length){
+        var buffered = video.buffered.end(video.buffered.length - 1);
+        var pct = Math.min(100, Math.round((buffered / video.duration) * 100));
+        loaderText.textContent = 'Preparing your invitation… ' + pct + '%';
+      }
+    }
+
+    [idleVideo, mainVideo].forEach(function(video){
+      if(!video) return;
+      video.addEventListener('canplaythrough', checkReady);
+      video.addEventListener('loadeddata', checkReady);
+      video.addEventListener('error', checkReady); /* don't block on a broken source */
+      video.addEventListener('progress', updateProgressText);
+    });
+
+    checkReady(); /* covers videos that were already ready before we attached listeners */
+    setTimeout(hideLoader, MAX_WAIT_MS);
+
+    if(loaderSkip){
+      setTimeout(function(){ loaderSkip.classList.add('show'); }, SKIP_APPEAR_MS);
+      loaderSkip.addEventListener('click', hideLoader);
+    }
+  })();
+  </script>
 
   <div class="entrance-copy" id="entrance-copy">
     <p class="entrance-title">Shanu<span class="entrance-amp">&amp;</span>Shyam</p>
