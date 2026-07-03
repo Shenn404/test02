@@ -378,12 +378,19 @@
     .floral-wrap{ opacity:0.7; }
   }
 
-  /* ============ SOUND TOGGLE ============ */
-  .sfx-toggle{
+  /* ============ SOUND TOGGLE + VOLUME ============ */
+  .sound-control{
     position:fixed;
     top:max(18px, env(safe-area-inset-top));
     right:max(18px, env(safe-area-inset-right));
     z-index:999;
+    display:flex;
+    align-items:center;
+    gap:10px;
+  }
+  .sfx-toggle{
+    position:relative;
+    flex:0 0 auto;
     width:46px;
     height:46px;
     border-radius:50%;
@@ -411,6 +418,79 @@
   .sfx-toggle[aria-pressed="true"]{
     background:var(--accent-soft);
     border-color:var(--accent);
+  }
+
+  /* Volume slider: sits beside the toggle in its own glass pill so it's
+     always reachable (no hover-only reveal, which touch screens can't do). */
+  .volume-control{
+    display:flex;
+    align-items:center;
+    height:46px;
+    padding:0 14px;
+    border-radius:999px;
+    background:rgba(20,20,20,0.55);
+    backdrop-filter:blur(12px);
+    -webkit-backdrop-filter:blur(12px);
+    border:1px solid var(--glass-border);
+    box-shadow:0 10px 26px -12px rgba(0,0,0,0.6);
+    transition:opacity 0.3s ease;
+  }
+  .volume-slider{
+    -webkit-appearance:none;
+    appearance:none;
+    width:96px;
+    max-width:26vw;
+    height:20px;
+    margin:0;
+    background:transparent;
+    cursor:pointer;
+    touch-action:pan-y;
+  }
+  /* Track */
+  .volume-slider::-webkit-slider-runnable-track{
+    height:4px;
+    border-radius:999px;
+    background:rgba(255,255,255,0.28);
+  }
+  .volume-slider::-moz-range-track{
+    height:4px;
+    border-radius:999px;
+    background:rgba(255,255,255,0.28);
+  }
+  .volume-slider::-moz-range-progress{
+    height:4px;
+    border-radius:999px;
+    background:var(--accent);
+  }
+  /* Thumb — sized generously for finger taps, not just mouse pointers */
+  .volume-slider::-webkit-slider-thumb{
+    -webkit-appearance:none;
+    appearance:none;
+    width:18px;
+    height:18px;
+    margin-top:-7px;
+    border-radius:50%;
+    background:var(--accent);
+    border:2px solid var(--bg-primary);
+    box-shadow:0 2px 8px rgba(0,0,0,0.5);
+  }
+  .volume-slider::-moz-range-thumb{
+    width:18px;
+    height:18px;
+    border:2px solid var(--bg-primary);
+    border-radius:50%;
+    background:var(--accent);
+    box-shadow:0 2px 8px rgba(0,0,0,0.5);
+  }
+  .volume-slider:focus-visible{ outline:none; }
+  .volume-slider:focus-visible::-webkit-slider-thumb{ box-shadow:0 0 0 3px var(--accent-dim); }
+  .volume-slider:focus-visible::-moz-range-thumb{ box-shadow:0 0 0 3px var(--accent-dim); }
+
+  @media (max-width:600px){
+    .sound-control{ gap:8px; }
+    .volume-control{ height:42px; padding:0 12px; }
+    .volume-slider{ width:72px; height:18px; }
+    .sfx-toggle{ width:42px; height:42px; }
   }
 
   /* ============ SECTIONS ============ */
@@ -909,6 +989,12 @@
   </video>
   <div class="entrance-video-overlay"></div>
 
+  <!-- BACKGROUND MUSIC: the site's ambient soundtrack. Loops continuously
+       once the guest enters (or toggles music on), fades in/out with the
+       music button, and is kept separate from the entrance video's own
+       audio so the two never overlap. STEP: replace bgm.mp3 to swap tracks. -->
+  <audio id="bgm-audio" src="bgm.mp3" loop preload="auto"></audio>
+
   <script>
   /* Runs immediately (before the rest of the page's script) so it starts
      listening the moment these two <video> tags exist — nothing is missed
@@ -921,6 +1007,10 @@
     var loaderSkip = document.getElementById('site-loader-skip');
     var idleVideo = document.getElementById('entrance-video-idle');
     var mainVideo = document.getElementById('entrance-video-main');
+    /* The BGM element is preloaded (not played) right alongside the videos,
+       so by the time the load screen ends the track is already buffered
+       and ready to start instantly — see mediaItems below. */
+    var bgmAudio = document.getElementById('bgm-audio');
 
     var MIN_DISPLAY_MS = 900;   /* avoid an unpleasant flash on fast connections */
     var MAX_WAIT_MS = 12000;    /* don't trap slow connections forever */
@@ -932,6 +1022,16 @@
     function hideLoader(){
       if(dismissed) return;
       dismissed = true;
+
+      /* The load screen is ending now: hand off to the main script so it
+         can start the background music. It may not be defined yet if this
+         fires unusually fast, so fall back to a flag it checks on load. */
+      if(typeof window.onSiteLoaderDismissed === 'function'){
+        window.onSiteLoaderDismissed();
+      } else {
+        window.__loaderDismissedPending = true;
+      }
+
       var wait = Math.max(0, MIN_DISPLAY_MS - (Date.now() - startTime));
       setTimeout(function(){
         loader.classList.add('loader-hide');
@@ -939,14 +1039,16 @@
       }, wait);
     }
 
-    function videoIsReady(video){
+    function mediaIsReady(media){
       /* readyState 3 = HAVE_FUTURE_DATA, 4 = HAVE_ENOUGH_DATA — either is
-         enough to start smooth playback. */
-      return !video || video.readyState >= 3;
+         enough to start smooth playback, for both <video> and <audio>. */
+      return !media || media.readyState >= 3;
     }
 
     function checkReady(){
-      if(videoIsReady(idleVideo) && videoIsReady(mainVideo)){ hideLoader(); }
+      if(mediaIsReady(idleVideo) && mediaIsReady(mainVideo) && mediaIsReady(bgmAudio)){
+        hideLoader();
+      }
     }
 
     function updateProgressText(){
@@ -959,15 +1061,15 @@
       }
     }
 
-    [idleVideo, mainVideo].forEach(function(video){
-      if(!video) return;
-      video.addEventListener('canplaythrough', checkReady);
-      video.addEventListener('loadeddata', checkReady);
-      video.addEventListener('error', checkReady); /* don't block on a broken source */
-      video.addEventListener('progress', updateProgressText);
+    [idleVideo, mainVideo, bgmAudio].forEach(function(media){
+      if(!media) return;
+      media.addEventListener('canplaythrough', checkReady);
+      media.addEventListener('loadeddata', checkReady);
+      media.addEventListener('error', checkReady); /* don't block on a broken source */
+      media.addEventListener('progress', updateProgressText);
     });
 
-    checkReady(); /* covers videos that were already ready before we attached listeners */
+    checkReady(); /* covers media that were already ready before we attached listeners */
     setTimeout(hideLoader, MAX_WAIT_MS);
 
     if(loaderSkip){
@@ -985,6 +1087,10 @@
 
 </div>
 
+<div class="sound-control">
+<div class="volume-control">
+  <input type="range" id="bgm-volume" class="volume-slider" min="0" max="100" value="55" step="1" aria-label="Music volume">
+</div>
 <button type="button" id="sfx-toggle" class="sfx-toggle" aria-pressed="false" aria-label="Turn on sound">
   <svg class="icon-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
     <path d="M4 9v6h4l5 5V4L8 9H4z"/>
@@ -996,6 +1102,7 @@
     <path d="M16 9l5 6M21 9l-5 6"/>
   </svg>
 </button>
+</div>
 
 <!-- Shared botanical artwork definitions (original linework, amethyst & lilac palette) -->
 <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
@@ -1322,168 +1429,70 @@
     playTone(1046.5, now + 0.09, 0.4, 0.045, 'sine');
   }
 
-  /* ===== Ambient background music (generative, calm & cozy) =====
-     A slow warm chord pad (F–C–Am–G6) with soft reverb, plus occasional
-     gentle plucked notes — all synthesized live, so there's no audio file
-     to load and no copyright concern. Loops indefinitely while enabled. */
+  /* ===== Background music (custom track) =====
+     Plays the uploaded bgm.mp3 on a loop, with a gentle fade in/out
+     whenever it's toggled on or off so it never starts or stops abruptly. */
   var ambientActive = false;
-  var ambientMaster = null, ambientFilter = null;
-  var ambientTimers = [];
+  var ambientFadeTimer = null;
+  var AMBIENT_VOLUME = 0.55;
+  var AMBIENT_FADE_MS = 1400;
+  var bgmAudio = document.getElementById('bgm-audio');
 
-  function createReverbImpulse(ctx, duration, decay){
-    var rate = ctx.sampleRate;
-    var length = Math.floor(rate * duration);
-    var impulse = ctx.createBuffer(2, length, rate);
-    for(var ch = 0; ch < 2; ch++){
-      var data = impulse.getChannelData(ch);
-      for(var i = 0; i < length; i++){
-        data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, decay);
+  function fadeAmbientTo(target, durationMs){
+    if(!bgmAudio) return;
+    if(ambientFadeTimer){ clearInterval(ambientFadeTimer); ambientFadeTimer = null; }
+    var steps = 24;
+    var stepMs = durationMs / steps;
+    var start = bgmAudio.volume;
+    var diff = target - start;
+    var i = 0;
+    ambientFadeTimer = setInterval(function(){
+      i++;
+      bgmAudio.volume = Math.min(1, Math.max(0, start + diff * (i / steps)));
+      if(i >= steps){
+        clearInterval(ambientFadeTimer);
+        ambientFadeTimer = null;
+        if(target <= 0){ bgmAudio.pause(); }
       }
-    }
-    return impulse;
-  }
-
-  function ensureAmbientGraph(){
-    var ctx = getAudioCtx();
-    if(!ctx || ambientMaster) return ctx;
-
-    ambientMaster = ctx.createGain();
-    ambientMaster.gain.value = 0.0001;
-
-    ambientFilter = ctx.createBiquadFilter();
-    ambientFilter.type = 'lowpass';
-    ambientFilter.frequency.value = 1400;
-    ambientFilter.Q.value = 0.3;
-
-    var convolver = ctx.createConvolver();
-    convolver.buffer = createReverbImpulse(ctx, 3.2, 2.4);
-
-    var dry = ctx.createGain(); dry.gain.value = 0.5;
-    var wet = ctx.createGain(); wet.gain.value = 0.7;
-
-    ambientFilter.connect(dry);
-    ambientFilter.connect(convolver);
-    convolver.connect(wet);
-    dry.connect(ambientMaster);
-    wet.connect(ambientMaster);
-    ambientMaster.connect(ctx.destination);
-
-    return ctx;
-  }
-
-  var CHORD_PROGRESSION = [
-    [174.61, 220.00, 261.63, 329.63], /* Fmaj7 */
-    [130.81, 164.81, 196.00, 246.94], /* Cmaj7 */
-    [110.00, 130.81, 164.81, 196.00], /* Am7   */
-    [196.00, 246.94, 293.66, 329.63]  /* G6    */
-  ];
-  var CHORD_DURATION = 10;  /* how long each pad's envelope lasts */
-  var CHORD_INTERVAL = 7;   /* how often a new chord starts (shorter = overlap) */
-  var PLUCK_NOTES = [349.23, 392.00, 440.00, 523.25, 587.33, 698.46];
-
-  function playPadChord(freqs, startTime, duration){
-    freqs.forEach(function(freq){
-      var osc1 = audioCtx.createOscillator();
-      osc1.type = 'sine';
-      osc1.frequency.value = freq;
-      var osc2 = audioCtx.createOscillator();
-      osc2.type = 'triangle';
-      osc2.frequency.value = freq * 1.004; /* slight detune for warmth */
-
-      var gain = audioCtx.createGain();
-      var peak = 0.085 / freqs.length;
-      gain.gain.setValueAtTime(0.0001, startTime);
-      gain.gain.exponentialRampToValueAtTime(peak, startTime + 3);
-      gain.gain.setValueAtTime(peak, startTime + duration - 3);
-      gain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
-
-      osc1.connect(gain); osc2.connect(gain);
-      gain.connect(ambientFilter);
-      osc1.start(startTime); osc1.stop(startTime + duration + 0.1);
-      osc2.start(startTime); osc2.stop(startTime + duration + 0.1);
-    });
-  }
-
-  function scheduleChord(index){
-    if(!ambientActive) return;
-    var startTime = audioCtx.currentTime + 0.05;
-    playPadChord(CHORD_PROGRESSION[index], startTime, CHORD_DURATION);
-    var t = setTimeout(function(){
-      scheduleChord((index + 1) % CHORD_PROGRESSION.length);
-    }, CHORD_INTERVAL * 1000);
-    ambientTimers.push(t);
-  }
-
-  function playPluck(){
-    var freq = PLUCK_NOTES[Math.floor(Math.random() * PLUCK_NOTES.length)];
-    var now = audioCtx.currentTime;
-    var osc = audioCtx.createOscillator();
-    osc.type = 'sine';
-    osc.frequency.value = freq;
-
-    var gain = audioCtx.createGain();
-    gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(0.045, now + 0.01);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + 2.2);
-
-    var node = osc;
-    if(audioCtx.createStereoPanner){
-      var panner = audioCtx.createStereoPanner();
-      panner.pan.value = Math.random() * 1.6 - 0.8;
-      osc.connect(gain);
-      gain.connect(panner);
-      panner.connect(ambientFilter);
-    } else {
-      osc.connect(gain);
-      gain.connect(ambientFilter);
-    }
-    osc.start(now);
-    osc.stop(now + 2.3);
-  }
-
-  function schedulePluck(){
-    if(!ambientActive) return;
-    var delay = 3000 + Math.random() * 4000;
-    var t = setTimeout(function(){
-      if(!ambientActive) return;
-      playPluck();
-      schedulePluck();
-    }, delay);
-    ambientTimers.push(t);
+    }, stepMs);
   }
 
   function startAmbient(){
-    var ctx = ensureAmbientGraph();
-    if(!ctx) return;
+    if(!bgmAudio) return;
     ambientActive = true;
-    var now = ctx.currentTime;
-    ambientMaster.gain.cancelScheduledValues(now);
-    ambientMaster.gain.setValueAtTime(ambientMaster.gain.value, now);
-    ambientMaster.gain.linearRampToValueAtTime(1, now + 2);
-    scheduleChord(0);
-    schedulePluck();
+    bgmAudio.volume = bgmAudio.paused ? 0 : bgmAudio.volume;
+    var playAttempt = bgmAudio.play();
+    if(playAttempt && typeof playAttempt.catch === 'function'){
+      playAttempt.catch(function(){ /* blocked until a user gesture; toggle/enter click retries this */ });
+    }
+    fadeAmbientTo(AMBIENT_VOLUME, AMBIENT_FADE_MS);
   }
 
   function stopAmbient(){
     ambientActive = false;
-    ambientTimers.forEach(function(t){ clearTimeout(t); });
-    ambientTimers = [];
-    if(ambientMaster){
-      var ctx = ambientMaster.context;
-      var now = ctx.currentTime;
-      ambientMaster.gain.cancelScheduledValues(now);
-      ambientMaster.gain.setValueAtTime(ambientMaster.gain.value, now);
-      ambientMaster.gain.linearRampToValueAtTime(0.0001, now + 1.3);
-    }
+    fadeAmbientTo(0, AMBIENT_FADE_MS);
   }
 
   var sfxToggle = document.getElementById('sfx-toggle');
+  var volumeSlider = document.getElementById('bgm-volume');
+
+  function syncToggleUI(){
+    if(!sfxToggle) return;
+    sfxToggle.setAttribute('aria-pressed', String(sfxEnabled));
+    sfxToggle.setAttribute('aria-label', sfxEnabled ? 'Turn off music' : 'Turn on music');
+  }
+
   if(sfxToggle){
     sfxToggle.addEventListener('click', function(){
       sfxEnabled = !sfxEnabled;
-      sfxToggle.setAttribute('aria-pressed', String(sfxEnabled));
-      sfxToggle.setAttribute('aria-label', sfxEnabled ? 'Turn off music' : 'Turn on music');
+      syncToggleUI();
       if(sfxEnabled){
+        /* If the volume was dragged down to zero earlier, restore a
+           sensible level so turning the toggle back on is audible. */
+        if(AMBIENT_VOLUME <= 0){
+          AMBIENT_VOLUME = 0.55;
+          if(volumeSlider){ volumeSlider.value = '55'; }
+        }
         playWelcomeChime();
         startAmbient();
       } else {
@@ -1492,9 +1501,68 @@
     });
   }
 
+  /* ===== Volume slider =====
+     Lets guests dial the ambient music up or down (or drag to zero to mute)
+     without losing the on/off toggle's own state — the two stay in sync. */
+  if(volumeSlider){
+    volumeSlider.addEventListener('input', function(){
+      var val = Number(volumeSlider.value) / 100;
+      AMBIENT_VOLUME = val;
+
+      if(val <= 0){
+        if(sfxEnabled){ sfxEnabled = false; syncToggleUI(); stopAmbient(); }
+        return;
+      }
+
+      if(!sfxEnabled){
+        sfxEnabled = true;
+        syncToggleUI();
+        startAmbient();
+      } else if(bgmAudio){
+        if(ambientFadeTimer){ clearInterval(ambientFadeTimer); ambientFadeTimer = null; }
+        bgmAudio.volume = val;
+        if(bgmAudio.paused){
+          var resumeAttempt = bgmAudio.play();
+          if(resumeAttempt && typeof resumeAttempt.catch === 'function'){ resumeAttempt.catch(function(){}); }
+        }
+      }
+    });
+  }
+
   document.querySelectorAll('.btn').forEach(function(btn){
     if(btn.id === 'sfx-toggle') return;
     btn.addEventListener('click', function(){ playTapChime(); });
+  });
+
+  /* ===== Auto-start the BGM once the load screen ends =====
+     The loader script (which runs earlier, before this block exists) calls
+     window.onSiteLoaderDismissed as soon as the load screen finishes. We
+     define it here and also cover the case where the loader already fired
+     before this script ran (window.__loaderDismissedPending). */
+  window.onSiteLoaderDismissed = function(){
+    if(!sfxEnabled){
+      sfxEnabled = true;
+      syncToggleUI();
+    }
+    startAmbient();
+  };
+  if(window.__loaderDismissedPending){
+    window.__loaderDismissedPending = false;
+    window.onSiteLoaderDismissed();
+  }
+
+  /* Browsers block audio-with-sound that isn't triggered by a user
+     gesture, so the auto-start above may get silently blocked on some
+     devices. As a safety net, retry playback on the guest's first tap
+     anywhere on the page (the "Begin the Celebration" button included). */
+  function retryAmbientOnFirstGesture(){
+    if(sfxEnabled && bgmAudio && bgmAudio.paused){
+      var retryAttempt = bgmAudio.play();
+      if(retryAttempt && typeof retryAttempt.catch === 'function'){ retryAttempt.catch(function(){}); }
+    }
+  }
+  ['pointerdown', 'keydown'].forEach(function(evt){
+    window.addEventListener(evt, retryAmbientOnFirstGesture, { passive:true });
   });
 
   /* ===== Entrance animation =====
@@ -1519,17 +1587,6 @@
     document.body.classList.remove('entrance-active');
     document.body.classList.add('entrance-done');
 
-    /* Start the site's ambient sound now that the video's own audio is done. */
-    if(!sfxEnabled){
-      sfxEnabled = true;
-      if(sfxToggle){
-        sfxToggle.setAttribute('aria-pressed', 'true');
-        sfxToggle.setAttribute('aria-label', 'Turn off music');
-      }
-      playWelcomeChime();
-      startAmbient();
-    }
-
     setTimeout(function(){
       if(entranceScreen){ entranceScreen.style.display = 'none'; }
       if(entranceVideoIdle){ entranceVideoIdle.pause(); }
@@ -1542,6 +1599,18 @@
     if(entranceCopy){ entranceCopy.classList.add('entrance-fade'); }
     if(entranceScreen){ entranceScreen.classList.add('playing'); }
     if(entranceVideoIdle){ entranceVideoIdle.pause(); }
+
+    /* The background music already started automatically once the load
+       screen finished (see onSiteLoaderDismissed above). This tap is a
+       guaranteed user gesture though, so use it as a reliable fallback
+       in case the browser silently blocked that earlier autoplay. */
+    if(!sfxEnabled){
+      sfxEnabled = true;
+      syncToggleUI();
+      startAmbient();
+    } else if(bgmAudio && bgmAudio.paused){
+      startAmbient();
+    }
 
     if(entranceVideoMain){
       var settled = false;
